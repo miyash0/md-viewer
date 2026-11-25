@@ -24,6 +24,7 @@ MD_EXTS = {".md", ".markdown"}
 EXCLUDED_DIRS = {"node_modules", "__pycache__", "venv"}
 INDEX_NAMES = ("README.md", "index.md")
 MAX_INTERVAL = 10.0
+APP_PREFIX = "_md"
 DIST_DIR = Path(__file__).resolve().parent / "frontend" / "dist"
 
 
@@ -52,7 +53,10 @@ def resolve_target(path, cwd):
 
 def safe_path(root, rel):
     """URL デコード済みの相対パスをルート配下に解決する。外を指すなら None。"""
-    candidate = (root / rel.lstrip("/")).resolve()
+    try:
+        candidate = (root / rel.lstrip("/")).resolve()
+    except (ValueError, OSError):  # NUL バイトなど
+        return None
     if candidate == root or root in candidate.parents:
         return candidate
     return None
@@ -82,14 +86,17 @@ def build_tree(root):
     files_of = {}  # 相対ディレクトリ -> ファイルノード
     subdirs_of = {}  # 相対ディレクトリ -> 子ディレクトリ名
     for dirpath, dirs, files in os.walk(root):
-        dirs[:] = [d for d in dirs if not _excluded(d)]
         rel_dir = os.path.relpath(dirpath, root)
         rel_dir = "" if rel_dir == "." else rel_dir.replace(os.sep, "/")
         prefix = f"{rel_dir}/" if rel_dir else ""
+        # ルート直下の _md はアプリの URL（/_md/）と重なって開けないので出さない
+        dirs[:] = [d for d in dirs if not _excluded(d) and not (rel_dir == "" and d == APP_PREFIX)]
         subdirs_of[rel_dir] = list(dirs)
         files_of[rel_dir] = [
             {"type": "file", "name": f, "path": prefix + f}
-            for f in files if not _excluded(f) and is_markdown(f)
+            for f in files
+            if not _excluded(f) and is_markdown(f)
+            and not (os.path.islink(os.path.join(dirpath, f)) and safe_path(root, prefix + f) is None)
         ]
 
     def assemble(rel_dir):
@@ -171,7 +178,8 @@ class Watcher:
         mtimes = {}
         for p in [*_md_paths(tree), *self.extra]:
             try:
-                mtimes[p] = (self.root / p).stat().st_mtime_ns
+                st = (self.root / p).stat()
+                mtimes[p] = (st.st_mtime_ns, st.st_size)  # mtime が粗い FS でもサイズ変化で拾う
             except OSError:
                 pass
         return tree, mtimes
@@ -251,6 +259,8 @@ def make_handler(root, initial, watcher, dist):
                 return self._error(403)  # DNS リバインディング対策
             url = urllib.parse.urlsplit(self.path)
             path = urllib.parse.unquote(url.path)
+            if "\x00" in path or "\x00" in urllib.parse.unquote(url.query):
+                return self._error(400)
             if path.startswith("/_md/api/"):
                 return self._api(path[len("/_md/api/"):], urllib.parse.parse_qs(url.query))
             if path == "/_md" or path.startswith("/_md/"):
@@ -311,6 +321,12 @@ def make_handler(root, initial, watcher, dist):
     return Handler
 
 
+def root_warnings(root):
+    if (root / APP_PREFIX).is_dir():
+        return [f"注意: {root / APP_PREFIX} はアプリの URL (/_md/) と重なるため表示できません"]
+    return []
+
+
 def start_url(port, initial):
     return f"http://{HOST}:{port}/" + (urllib.parse.quote(initial) if initial else "")
 
@@ -322,6 +338,8 @@ def main(argv=None):
               file=sys.stderr)
         raise SystemExit(1)
     root, initial = resolve_target(args.path, Path.cwd())
+    for w in root_warnings(root):
+        print(w, file=sys.stderr)
     watcher = Watcher(root, extra=[initial])
     srv = bind_server(args.port, make_handler(root, initial, watcher, DIST_DIR))
     watcher.start()

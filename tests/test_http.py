@@ -273,3 +273,68 @@ class AdaptiveIntervalTest(unittest.TestCase):
         self.assertEqual(main.next_interval(0.3, 0.01), 0.3)
         self.assertEqual(main.next_interval(0.3, 1.4), 2.8)
         self.assertEqual(main.next_interval(0.3, 30), 10.0)
+
+
+class MinorFixesTest(ServerCase):
+    def test_nul_in_path_is_400(self):
+        self.assertEqual(self.get("/a%00b.md")[0], 400)
+        self.assertEqual(self.get("/_md/api/raw?path=a%00b.md")[0], 400)
+
+    def test_server_survives_nul(self):
+        self.get("/a%00b.md")
+        self.assertEqual(self.get("/README.md")[0], 200)
+
+
+class TreeMinorTest(unittest.TestCase):
+    def test_symlink_md_outside_root_not_listed(self):
+        with tempfile.TemporaryDirectory() as d, tempfile.TemporaryDirectory() as out:
+            root = Path(d).resolve()
+            Path(out, "x.md").write_text("x")
+            os.symlink(Path(out, "x.md"), root / "link.md")
+            (root / "ok.md").write_text("ok")
+            os.symlink(root / "ok.md", root / "inner-link.md")
+            names = [n["name"] for n in main.build_tree(root)]
+            self.assertEqual(names, ["inner-link.md", "ok.md"])
+
+    def test_root_md_dir_is_not_listed(self):
+        with tempfile.TemporaryDirectory() as d:
+            root = Path(d).resolve()
+            (root / "_md").mkdir()
+            (root / "_md/a.md").write_text("a")
+            (root / "sub/_md").mkdir(parents=True)
+            (root / "sub/_md/b.md").write_text("b")
+            tree = main.build_tree(root)
+            self.assertEqual([n["path"] for n in tree], ["sub"])
+
+    def test_main_warns_about_root_md_dir(self):
+        with tempfile.TemporaryDirectory() as d:
+            root = Path(d).resolve()
+            (root / "_md").mkdir()
+            self.assertIn("_md", main.root_warnings(root)[0])
+            (root / "_md").rmdir()
+            self.assertEqual(main.root_warnings(root), [])
+
+
+class SizeChangeTest(unittest.TestCase):
+    def test_same_mtime_different_size_is_change(self):
+        with tempfile.TemporaryDirectory() as d:
+            root = Path(d).resolve()
+            p = root / "a.md"
+            p.write_text("a")
+            st = p.stat()
+            w = main.Watcher(root, interval=0.05)
+            w.start()
+            q = w.subscribe()
+            time.sleep(0.15)
+            p.write_text("longer content")
+            os.utime(p, ns=(st.st_atime_ns, st.st_mtime_ns))  # mtime を元に戻す（粗い mtime の FS を再現）
+            deadline = time.time() + 2
+            got = False
+            while time.time() < deadline and not got:
+                try:
+                    k, data = q.get(timeout=0.1)
+                except Exception:
+                    continue
+                got = k == "change" and data == {"path": "a.md"}
+            w.stop()
+            self.assertTrue(got)
