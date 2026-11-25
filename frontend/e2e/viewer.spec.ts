@@ -129,6 +129,12 @@ test("Mermaid の構文エラーはそのブロックだけがエラーになる
   await expect(page.locator(".md-content .md-error")).toContainText("Mermaid エラー");
   await expect(page.locator(".md-content")).toContainText("本文は表示される");
   await expect(page.locator(".md-content svg")).toHaveCount(1);
+  // Mermaid がエラー図を <body> 直下に残さない（再描画のたびにページが伸びていた）
+  await expect(page.locator("body > :not(#app)")).toHaveCount(0);
+  await writeFile(join(md.dir, "docs/broken.md"), (await readFile(join(md.dir, "docs/broken.md"), "utf8")) + "\n追記\n");
+  await expect(page.locator(".md-content")).toContainText("追記");
+  await expect(page.locator(".md-content .md-error")).toHaveCount(1);
+  await expect(page.locator("body > :not(#app)")).toHaveCount(0);
 });
 
 test("サーバー停止中の編集が、再起動後に反映される", async ({ page, md }) => {
