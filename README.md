@@ -9,6 +9,7 @@ Preview Markdown in your browser. Updates automatically when you save.
 ## Setup (once)
 
 1. `cd frontend && npm install && npm run build && cd ..`
+   - Without Node: `docker build -f frontend/Dockerfile --output frontend/dist frontend`
 2. `ln -s "$PWD/main.py" ~/.local/bin/md`
 
 After changing `frontend/`, run `npm run build` again.
