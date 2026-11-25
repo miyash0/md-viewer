@@ -87,3 +87,15 @@ test("古いリクエストの結果で上書きしない", async () => {
   await new Promise((r) => setTimeout(r, 20));
   expect(container.querySelector("h1#slow")).toBeNull();
 });
+
+test("アンマウント後に届いた結果では状態を通知しない", async () => {
+  let resolve!: (s: string) => void;
+  fetchRaw.mockImplementationOnce(() => new Promise((r) => (resolve = r)));
+  const { unmount } = render(<Content {...props("a.md")} />);
+  unmount();
+  const before = states.length;
+  resolve("# late");
+  await new Promise((r) => setTimeout(r, 20));
+  expect(states.slice(before)).toEqual([]);
+  expect(tocs).toEqual([]);
+});

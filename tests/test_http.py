@@ -190,3 +190,86 @@ class MainTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class HardeningTest(ServerCase):
+    def get_host(self, path, host, accept=None):
+        import http.client
+        c = http.client.HTTPConnection("127.0.0.1", self.srv.server_address[1], timeout=5)
+        headers = {"Host": host}
+        if accept:
+            headers["Accept"] = accept
+        c.request("GET", path, headers=headers)
+        r = c.getresponse()
+        body = r.read()
+        c.close()
+        return r.status, r.headers, body
+
+    def test_foreign_host_rejected(self):
+        self.assertEqual(self.get_host("/README.md", "evil.example:%d" % self.srv.server_address[1])[0], 403)
+
+    def test_localhost_hosts_allowed(self):
+        port = self.srv.server_address[1]
+        self.assertEqual(self.get_host("/README.md", f"127.0.0.1:{port}")[0], 200)
+        self.assertEqual(self.get_host("/README.md", f"localhost:{port}")[0], 200)
+
+    def test_dotfiles_not_served(self):
+        (self.root / ".env").write_text("SECRET=1")
+        (self.root / ".ssh").mkdir()
+        (self.root / ".ssh/id_rsa").write_text("key")
+        self.assertEqual(self.get("/.env")[0], 404)
+        self.assertEqual(self.get("/.ssh/id_rsa")[0], 404)
+        self.assertEqual(self.get("/_md/api/raw?path=.env")[0], 404)
+
+    def test_spa_has_csp(self):
+        port = self.srv.server_address[1]
+        _, headers, _ = self.get_host("/README.md", f"127.0.0.1:{port}", self.HTML)
+        csp = headers["Content-Security-Policy"]
+        self.assertIn(f"script-src http://127.0.0.1:{port}/_md/", csp)
+        self.assertIn("connect-src 'self'", csp)
+        self.assertIn("object-src 'none'", csp)
+
+    def test_user_files_are_sandboxed(self):
+        (self.root / "evil.html").write_text("<script>fetch('/_md/api/raw?path=README.md')</script>")
+        _, headers, _ = self.get_host("/evil.html", f"127.0.0.1:{self.srv.server_address[1]}", self.HTML)
+        self.assertEqual(headers["Content-Security-Policy"], "sandbox")
+
+    def test_non_utf8_filename_does_not_break_tree(self):
+        os.close(os.open(os.fsencode(self.root) + b"/bad\xff.md", os.O_CREAT | os.O_WRONLY))
+        status, _, body = self.get("/_md/api/tree")
+        self.assertEqual(status, 200)
+        names = [n["name"] for n in json.loads(body)["tree"]]
+        self.assertIn("README.md", names)
+        self.assertFalse([n for n in names if n.startswith("bad")])
+
+
+class HiddenInitialTest(unittest.TestCase):
+    def test_initial_hidden_file_is_watched_and_served(self):
+        with tempfile.TemporaryDirectory() as d:
+            root = Path(d).resolve()
+            p = root / ".notes.md"
+            p.write_text("a")
+            w = main.Watcher(root, interval=0.05, extra=[".notes.md"])
+            w.start()
+            q = w.subscribe()
+            time.sleep(0.15)
+            p.write_text("b")
+            os.utime(p, ns=(time.time_ns() + 10**9,) * 2)
+            deadline = time.time() + 2
+            got = None
+            while time.time() < deadline and got is None:
+                try:
+                    k, data = q.get(timeout=0.1)
+                except Exception:
+                    continue
+                if k == "change" and data == {"path": ".notes.md"}:
+                    got = data
+            w.stop()
+            self.assertIsNotNone(got)
+
+
+class AdaptiveIntervalTest(unittest.TestCase):
+    def test_slow_snapshot_backs_off(self):
+        self.assertEqual(main.next_interval(0.3, 0.01), 0.3)
+        self.assertEqual(main.next_interval(0.3, 1.4), 2.8)
+        self.assertEqual(main.next_interval(0.3, 30), 10.0)

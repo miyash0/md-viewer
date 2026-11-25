@@ -102,3 +102,11 @@ test("狭い画面ではサイドバーが閉じて始まり、トグルで開�
   await page.getByLabel("サイドバーを切り替え").click();
   await expect(page.getByRole("navigation", { name: "ファイル" })).toBeVisible();
 });
+
+test("Markdown 内の生 HTML のスクリプトは実行されない（CSP）", async ({ page, md }) => {
+  await writeFile(join(md.dir, "evil.md"), '# evil\n\n<img src="nope.png" onerror="window.pwned = 1">\n\n<script>window.pwned = 2</script>\n');
+  await page.goto(md.baseURL + "/evil.md");
+  await expect(page.locator("h1#evil")).toBeVisible();
+  await page.waitForTimeout(300);
+  expect(await page.evaluate(() => (window as unknown as { pwned?: number }).pwned)).toBeUndefined();
+});

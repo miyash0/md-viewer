@@ -41,12 +41,12 @@ export function Content({ path, reloadToken, onToc, onState }: Props) {
       let state: ViewState;
       try {
         const src = await fetchRaw(path);
-        if (my !== seq.current) return;
+        if (my !== seq.current || !ref.current) return;
         const { html, toc, hasMermaid } = renderMarkdown(src);
-        const el = ref.current!;
+        const el = ref.current;
         el.innerHTML = html;
         if (hasMermaid) await renderMermaid(el, dark);
-        if (my !== seq.current) return;
+        if (my !== seq.current || !ref.current) return;
         window.scrollTo(0, isReload ? scrollY : 0);
         if (!isReload && location.hash) {
           document.getElementById(decodeURIComponent(location.hash.slice(1)))?.scrollIntoView();
@@ -55,13 +55,17 @@ export function Content({ path, reloadToken, onToc, onState }: Props) {
         onToc(toc);
         state = { phase: "ready", error: null, updatedAt: isReload ? Date.now() : null };
       } catch (e) {
-        if (my !== seq.current) return;
+        if (my !== seq.current || !ref.current) return;
         if (!isReload && ref.current) ref.current.innerHTML = "";
         const msg = e instanceof NotFoundError ? `ファイルが見つかりません: ${path}` : String(e instanceof Error ? e.message : e);
         state = { phase: "ready", error: msg, updatedAt: null };
       }
       onState(state);
     })();
+    // パス変更やアンマウント後に届いた結果は捨てる
+    return () => {
+      seq.current++;
+    };
     // onToc/onState は親の再描画ごとに変わりうるので依存に含めない
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [path, reloadToken, dark]);

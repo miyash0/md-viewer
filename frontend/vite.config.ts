@@ -12,6 +12,7 @@ export default defineConfig({
     proxy: {
       "^/(?!_md/)|^/_md/api/": {
         target: backend,
+        changeOrigin: true, // md サーバーは Host が 127.0.0.1:<port> でないと拒否する
         // .md やディレクトリへのページ遷移は SPA を返す（本番の main.py と同じ振る舞い）
         bypass(req) {
           const url = req.url ?? "";

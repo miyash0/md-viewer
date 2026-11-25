@@ -12,6 +12,7 @@ import os
 import queue
 import sys
 import threading
+import time
 import urllib.parse
 import webbrowser
 from pathlib import Path
@@ -22,6 +23,7 @@ PORT_SEARCH = 100
 MD_EXTS = {".md", ".markdown"}
 EXCLUDED_DIRS = {"node_modules", "__pycache__", "venv"}
 INDEX_NAMES = ("README.md", "index.md")
+MAX_INTERVAL = 10.0
 DIST_DIR = Path(__file__).resolve().parent / "frontend" / "dist"
 
 
@@ -61,7 +63,18 @@ def is_markdown(p):
 
 
 def _excluded(name):
-    return name.startswith(".") or name in EXCLUDED_DIRS
+    if name.startswith(".") or name in EXCLUDED_DIRS:
+        return True
+    try:
+        name.encode("utf-8")  # UTF-8 でない名前（surrogateescape）は JSON にできないので扱わない
+    except UnicodeEncodeError:
+        return True
+    return False
+
+
+def next_interval(base, took):
+    """走査に時間がかかるほど間隔を空ける（巨大ディレクトリで CPU を使い続けないため）。"""
+    return min(MAX_INTERVAL, max(base, 2 * took))
 
 
 def build_tree(root):
@@ -128,9 +141,10 @@ def _md_paths(tree):
 class Watcher:
     """root 以下の Markdown を定期的に stat し、変化を購読キューへ流す。"""
 
-    def __init__(self, root, interval=0.3):
+    def __init__(self, root, interval=0.3, extra=()):
         self.root = root
         self.interval = interval
+        self.extra = [p for p in extra if p]  # ツリーに出ない初期ファイル（隠しファイルなど）も監視する
         self._subs = set()
         self._lock = threading.Lock()
         self._stop = threading.Event()
@@ -155,7 +169,7 @@ class Watcher:
     def _snapshot(self):
         tree = build_tree(self.root)
         mtimes = {}
-        for p in _md_paths(tree):
+        for p in [*_md_paths(tree), *self.extra]:
             try:
                 mtimes[p] = (self.root / p).stat().st_mtime_ns
             except OSError:
@@ -164,15 +178,18 @@ class Watcher:
 
     def _run(self):
         _, prev = self._snapshot()
-        while not self._stop.wait(self.interval):
+        wait = self.interval
+        while not self._stop.wait(wait):
+            started = time.monotonic()
             try:
                 tree, cur = self._snapshot()
             except OSError:
                 continue
+            wait = next_interval(self.interval, time.monotonic() - started)
             for p, m in cur.items():
                 if prev.get(p) != m:  # 変更、または一度消えて再出現（atomic save）
                     self._publish("change", {"path": p})
-            if cur.keys() != prev.keys():
+            if {p for p in cur if p not in self.extra} != {p for p in prev if p not in self.extra}:
                 self._publish("tree", {"rootName": self.root.name, "initial": None, "tree": tree})
             prev = cur
 
@@ -192,9 +209,11 @@ def make_handler(root, initial, watcher, dist):
         def log_message(self, *a):
             pass
 
-        def _send(self, status, body, ctype):
+        def _send(self, status, body, ctype, headers=()):
             self.send_response(status)
             self.send_header("Content-Type", ctype)
+            for k, v in headers:
+                self.send_header(k, v)
             self.send_header("Content-Length", str(len(body)))
             self.send_header("Cache-Control", "no-cache")
             self.end_headers()
@@ -203,7 +222,7 @@ def make_handler(root, initial, watcher, dist):
         def _error(self, status):
             self._send(status, f"{status}\n".encode(), "text/plain; charset=utf-8")
 
-        def _file(self, p):
+        def _file(self, p, headers=()):
             if p is None:
                 return self._error(403)
             if p.is_dir() and (p / "index.html").is_file() and p == dist:
@@ -213,9 +232,23 @@ def make_handler(root, initial, watcher, dist):
             ctype = mimetypes.guess_type(p.name)[0] or "application/octet-stream"
             if ctype.startswith("text/") or is_markdown(p):
                 ctype = ("text/plain" if is_markdown(p) else ctype) + "; charset=utf-8"
-            self._send(200, p.read_bytes(), ctype)
+            self._send(200, p.read_bytes(), ctype, headers)
+
+        def _spa(self):
+            # Markdown 内の生 HTML からのスクリプト実行と外部送信を防ぐ
+            csp = (f"default-src 'self'; script-src http://{self.headers['Host']}/_md/; "
+                   "style-src 'self' 'unsafe-inline'; img-src * data: blob:; font-src 'self' data:; "
+                   "connect-src 'self'; object-src 'none'; base-uri 'none'; frame-ancestors 'none'")
+            return self._file(dist / "index.html", [("Content-Security-Policy", csp)])
+
+        def _hidden(self, rel):
+            rel = rel.strip("/")
+            return rel != initial and any(part.startswith(".") for part in rel.split("/"))
 
         def do_GET(self):
+            port = self.server.server_address[1]
+            if self.headers.get("Host") not in (f"{HOST}:{port}", f"localhost:{port}"):
+                return self._error(403)  # DNS リバインディング対策
             url = urllib.parse.urlsplit(self.path)
             path = urllib.parse.unquote(url.path)
             if path.startswith("/_md/api/"):
@@ -227,17 +260,23 @@ def make_handler(root, initial, watcher, dist):
                 return self._error(403)
             wants_html = "text/html" in self.headers.get("Accept", "")
             if wants_html and (target.is_dir() or is_markdown(target)):
-                return self._file(dist / "index.html")
-            return self._file(target)
+                return self._spa()
+            if self._hidden(path):
+                return self._error(404)
+            # ユーザーのファイル（.html や .svg を含む）は直接開かれてもスクリプトを実行させない
+            return self._file(target, [("Content-Security-Policy", "sandbox")])
 
         def _api(self, name, qs):
             if name == "tree":
                 body = json.dumps(tree_response(root, initial), ensure_ascii=False).encode()
                 return self._send(200, body, "application/json; charset=utf-8")
             if name == "raw":
-                p = safe_path(root, qs.get("path", [""])[0])
+                rel = qs.get("path", [""])[0]
+                p = safe_path(root, rel)
                 if p is None:
                     return self._error(403)
+                if self._hidden(rel):
+                    return self._error(404)
                 return self._file(p) if p.is_file() else self._error(404)
             if name == "events":
                 return self._events()
@@ -283,7 +322,7 @@ def main(argv=None):
               file=sys.stderr)
         raise SystemExit(1)
     root, initial = resolve_target(args.path, Path.cwd())
-    watcher = Watcher(root)
+    watcher = Watcher(root, extra=[initial])
     srv = bind_server(args.port, make_handler(root, initial, watcher, DIST_DIR))
     watcher.start()
     url = start_url(srv.server_address[1], initial)
