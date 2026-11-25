@@ -78,3 +78,80 @@ html, body { margin: 0; background: var(--md-bg); color: var(--md-fg); }
 .md-status-ok { color: var(--md-ok); }
 .md-status-warn { color: var(--md-warn); border-color: var(--md-warn); }
 .md-status-error { color: var(--md-error); border-color: var(--md-error); }
+
+/* レイアウト: 左サイドバー（上: ファイル / 下: 目次） */
+.md-layout { display: flex; min-height: 100vh; }
+.md-main { flex: 1 1 auto; min-width: 0; }
+
+.md-sidebar-toggle {
+  position: fixed;
+  top: 10px;
+  left: 10px;
+  z-index: 30;
+  width: 32px;
+  height: 32px;
+  border: 1px solid var(--md-border);
+  border-radius: 6px;
+  background: var(--md-panel);
+  color: var(--md-fg);
+  font-size: 16px;
+  cursor: pointer;
+}
+.md-sidebar-toggle:focus-visible, .md-sidebar button:focus-visible { outline: 2px solid var(--md-accent); outline-offset: 1px; }
+
+.md-sidebar {
+  position: sticky;
+  top: 0;
+  flex: 0 0 280px;
+  height: 100vh;
+  box-sizing: border-box;
+  padding-top: 52px;
+  display: flex;
+  flex-direction: column;
+  background: var(--md-panel);
+  border-right: 1px solid var(--md-border);
+  font: 14px/1.5 system-ui, sans-serif;
+}
+.md-sidebar-pane { flex: 1 1 50%; min-height: 0; overflow: auto; padding: 0 12px 12px; }
+.md-sidebar-pane + .md-sidebar-pane { border-top: 1px solid var(--md-border); padding-top: 8px; }
+.md-sidebar-heading {
+  margin: 4px 0 6px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--md-muted);
+  letter-spacing: 0.04em;
+}
+.md-tree-list, .md-toc-list { list-style: none; margin: 0; padding: 0; }
+.md-tree-list .md-tree-list { padding-left: 14px; }
+.md-tree-dir, .md-tree-file, .md-toc-item {
+  display: block;
+  width: 100%;
+  text-align: left;
+  border: 0;
+  border-radius: 4px;
+  background: none;
+  color: var(--md-fg);
+  font: inherit;
+  padding: 2px 6px;
+  cursor: pointer;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.md-tree-dir:hover, .md-tree-file:hover, .md-toc-item:hover { background: rgb(127 127 127 / 0.12); }
+.md-tree-file[aria-current="page"] { background: rgb(127 127 127 / 0.18); color: var(--md-accent); font-weight: 600; }
+.md-tree-caret { display: inline-block; width: 1em; color: var(--md-muted); }
+.md-muted { color: var(--md-muted); margin: 4px 6px; }
+
+@media (max-width: 800px) {
+  .md-sidebar {
+    position: fixed;
+    left: 0;
+    top: 0;
+    bottom: 0;
+    width: min(85vw, 300px);
+    z-index: 25;
+    box-shadow: 4px 0 16px rgb(0 0 0 / 0.2);
+  }
+  .md-content { padding: 56px 16px 80px; }
+}
