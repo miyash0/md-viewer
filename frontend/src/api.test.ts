@@ -78,3 +78,39 @@ test("subscribeEvents は change/tree/状態を伝え、再接続時にツリー
   stop();
   expect(es.closed).toBe(true);
 });
+
+test("再接続時に onReconnect を呼ぶ（初回接続では呼ばない）", async () => {
+  vi.stubGlobal("EventSource", FakeEventSource);
+  vi.stubGlobal("fetch", vi.fn(async () => Response.json({ rootName: "r", initial: null, tree: [] })));
+  const onReconnect = vi.fn();
+  const stop = subscribeEvents({ onChange() {}, onTree() {}, onStatus() {}, onReconnect });
+  const es = FakeEventSource.last;
+  es.onopen!();
+  expect(onReconnect).not.toHaveBeenCalled();
+  es.onerror!();
+  es.onopen!();
+  expect(onReconnect).toHaveBeenCalledTimes(1);
+  stop();
+});
+
+test("タブが非表示の間は接続を閉じ、表示されたら繋ぎ直して onReconnect", async () => {
+  vi.stubGlobal("EventSource", FakeEventSource);
+  vi.stubGlobal("fetch", vi.fn(async () => Response.json({ rootName: "r", initial: null, tree: [] })));
+  const onReconnect = vi.fn();
+  const statuses: string[] = [];
+  const stop = subscribeEvents({ onChange() {}, onTree() {}, onStatus: (s) => statuses.push(s), onReconnect });
+  const first = FakeEventSource.last;
+  first.onopen!();
+  Object.defineProperty(document, "visibilityState", { value: "hidden", configurable: true });
+  document.dispatchEvent(new Event("visibilitychange"));
+  expect(first.closed).toBe(true);
+  expect(statuses).not.toContain("disconnected");
+  Object.defineProperty(document, "visibilityState", { value: "visible", configurable: true });
+  document.dispatchEvent(new Event("visibilitychange"));
+  const second = FakeEventSource.last;
+  expect(second).not.toBe(first);
+  second.onopen!();
+  expect(onReconnect).toHaveBeenCalledTimes(1);
+  stop();
+  expect(second.closed).toBe(true);
+});

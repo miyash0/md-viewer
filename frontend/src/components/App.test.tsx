@@ -131,3 +131,19 @@ test("表示中のファイルがツリーから消えたら再読込してエ�
   act(() => handlers.onTree({ ...tree(null), tree: tree(null).tree.filter((n) => n.path !== "README.md") }));
   await waitFor(() => expect(fetchRaw.mock.calls.length).toBe(calls + 1));
 });
+
+test("再接続で表示中のファイルを読み直す", async () => {
+  treeResp = tree("README.md");
+  const { container } = render(<App />);
+  await waitFor(() => expect(content(container).querySelector("h1#readme")).not.toBeNull());
+  const calls = fetchRaw.mock.calls.length;
+  act(() => (handlers as unknown as { onReconnect(): void }).onReconnect());
+  await waitFor(() => expect(fetchRaw.mock.calls.length).toBe(calls + 1));
+});
+
+test("不正な % の URL でも画面が描画される", async () => {
+  treeResp = tree("README.md");
+  history.replaceState(null, "", "/a%zz.md");
+  const { container } = render(<App />);
+  await waitFor(() => expect(container.querySelector(".md-layout")).not.toBeNull());
+});

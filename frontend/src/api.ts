@@ -26,22 +26,49 @@ export function subscribeEvents(h: {
   onChange(path: string): void;
   onTree(t: TreeResponse): void;
   onStatus(s: ConnectionStatus): void;
+  /** 切断や非表示から復帰したとき。表示中の内容を読み直すために使う */
+  onReconnect?(): void;
 }): () => void {
-  const es = new EventSource("/_md/api/events");
-  let wasDisconnected = false;
-  h.onStatus("connecting");
-  es.onopen = () => {
-    h.onStatus("open");
-    if (wasDisconnected) {
-      wasDisconnected = false;
-      fetchTree().then(h.onTree, () => {});
+  let es: EventSource | null = null;
+  let needResync = false;
+
+  const connect = () => {
+    const src = new EventSource("/_md/api/events");
+    es = src;
+    src.onopen = () => {
+      h.onStatus("open");
+      if (needResync) {
+        needResync = false;
+        fetchTree().then(h.onTree, () => {});
+        h.onReconnect?.();
+      }
+    };
+    src.onerror = () => {
+      needResync = true;
+      h.onStatus("disconnected");
+    };
+    src.addEventListener("change", (e) => h.onChange(JSON.parse((e as MessageEvent).data).path));
+    src.addEventListener("tree", (e) => h.onTree(JSON.parse((e as MessageEvent).data)));
+  };
+
+  // ブラウザの同一ホスト接続数の上限（HTTP/1.1 で 6）を使い切らないよう、非表示のタブは接続を閉じる
+  const onVisibility = () => {
+    if (document.visibilityState === "hidden") {
+      es?.close();
+      es = null;
+      needResync = true;
+    } else if (!es) {
+      connect();
     }
   };
-  es.onerror = () => {
-    wasDisconnected = true;
-    h.onStatus("disconnected");
+
+  h.onStatus("connecting");
+  if (document.visibilityState === "hidden") needResync = true;
+  else connect();
+  document.addEventListener("visibilitychange", onVisibility);
+  return () => {
+    es?.close();
+    es = null;
+    document.removeEventListener("visibilitychange", onVisibility);
   };
-  es.addEventListener("change", (e) => h.onChange(JSON.parse((e as MessageEvent).data).path));
-  es.addEventListener("tree", (e) => h.onTree(JSON.parse((e as MessageEvent).data)));
-  return () => es.close();
 }

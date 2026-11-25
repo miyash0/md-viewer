@@ -29,12 +29,15 @@ export function Content({ path, reloadToken, onToc, onState }: Props) {
   const ref = useRef<HTMLElement>(null);
   const dark = useDark();
   const shown = useRef<string | null>(null); // 現在表示中のパス
+  const requested = useRef<string | null>(null); // 直前に読み込みを始めたパス
   const seq = useRef(0);
 
   useEffect(() => {
     if (path == null) return;
     const my = ++seq.current;
-    const isReload = shown.current === path;
+    // 同じパスを表示中に読み直すときだけ「再読込」。A→B（途中）→A は遷移として扱う
+    const isReload = shown.current === path && requested.current === path;
+    requested.current = path;
     const scrollY = window.scrollY;
     onState({ phase: "loading", error: null, updatedAt: null });
     (async () => {

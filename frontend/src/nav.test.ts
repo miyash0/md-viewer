@@ -34,3 +34,8 @@ test("isMarkdownPath", () => {
   expect(isMarkdownPath("a.markdown")).toBe(true);
   expect(isMarkdownPath("docs")).toBe(false);
 });
+
+test("不正な % を含むパスでも throw しない", () => {
+  expect(pathFromLocation("/a%zz.md")).toBe("a%zz.md");
+  expect(resolveMarkdownLink("a.md", "b%zz.md")).toBe("b%zz.md");
+});

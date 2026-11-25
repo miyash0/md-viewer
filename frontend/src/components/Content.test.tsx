@@ -99,3 +99,17 @@ test("アンマウント後に届いた結果では状態を通知しない", as
   expect(states.slice(before)).toEqual([]);
   expect(tocs).toEqual([]);
 });
+
+test("A→B（読み込み中）→A は再読込ではなく遷移として扱う", async () => {
+  fetchRaw.mockResolvedValueOnce("# a");
+  const { rerender } = render(<Content {...props("a.md", 0)} />);
+  await waitFor(() => expect(states.at(-1)?.phase).toBe("ready"));
+  fetchRaw.mockImplementationOnce(() => new Promise(() => {})); // B は終わらない
+  rerender(<Content {...props("b.md", 0)} />);
+  Object.defineProperty(window, "scrollY", { value: 500, configurable: true });
+  fetchRaw.mockResolvedValueOnce("# a");
+  rerender(<Content {...props("a.md", 0)} />);
+  await waitFor(() => expect(states.at(-1)?.phase).toBe("ready"));
+  expect(states.at(-1)?.updatedAt).toBeNull();
+  expect(window.scrollTo).toHaveBeenLastCalledWith(0, 0);
+});

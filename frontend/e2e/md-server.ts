@@ -8,7 +8,7 @@ import { fileURLToPath } from "node:url";
 const here = dirname(fileURLToPath(import.meta.url));
 const MAIN = join(here, "..", "..", "main.py");
 
-export type MdServer = { baseURL: string; dir: string; proc: ChildProcess };
+export type MdServer = { baseURL: string; dir: string; proc: ChildProcess; restart(): Promise<ChildProcess> };
 
 export const test = base.extend<{ md: MdServer }>({
   md: async ({}, use) => {
@@ -27,7 +27,21 @@ export const test = base.extend<{ md: MdServer }>({
       proc.on("exit", (code) => reject(new Error(`md exited (${code}): ${stderr}`)));
     });
     const baseURL = new URL(firstLine).origin;
-    await use({ baseURL, dir, proc });
+    // 同じポートで起動し直す（ポートが解放されるまで少し再試行する）
+    const restart = async () => {
+      const port = new URL(baseURL).port;
+      for (let i = 0; i < 50; i++) {
+        const p = spawn("python3", [MAIN, dir, "--no-open", "-p", port], { stdio: ["ignore", "pipe", "pipe"] });
+        const ok = await new Promise<boolean>((resolve) => {
+          p.stdout!.once("data", () => resolve(true));
+          p.once("exit", () => resolve(false));
+        });
+        if (ok) return p;
+        await new Promise((r) => setTimeout(r, 100));
+      }
+      throw new Error("md を再起動できませんでした");
+    };
+    await use({ baseURL, dir, proc, restart });
     proc.kill();
     await rm(dir, { recursive: true, force: true });
   },

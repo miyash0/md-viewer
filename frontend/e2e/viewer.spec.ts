@@ -110,3 +110,38 @@ test("Markdown 内の生 HTML のスクリプトは実行されない（CSP）",
   await page.waitForTimeout(300);
   expect(await page.evaluate(() => (window as unknown as { pwned?: number }).pwned)).toBeUndefined();
 });
+
+test("# と % を含むファイル名を開け、画像も表示される", async ({ page, md }) => {
+  await page.goto(md.baseURL + "/README.md");
+  await page.getByRole("navigation", { name: "ファイル" }).getByRole("button", { name: "docs" }).click();
+  await page.getByRole("button", { name: "a #1 100%.md" }).click();
+  await expect(page.locator("h1#記号")).toBeVisible();
+  expect(decodeURIComponent(new URL(page.url()).pathname)).toBe("/docs/a #1 100%.md");
+  const img = page.locator(".md-content img");
+  await expect.poll(() => img.evaluate((el: HTMLImageElement) => el.naturalWidth)).toBeGreaterThan(0);
+  await page.reload();
+  await expect(page.locator("h1#記号")).toBeVisible();
+});
+
+test("Mermaid の構文エラーはそのブロックだけがエラーになる", async ({ page, md }) => {
+  await page.goto(md.baseURL + "/docs/broken.md");
+  await expect(page.locator(".md-content .md-error")).toHaveCount(1);
+  await expect(page.locator(".md-content .md-error")).toContainText("Mermaid エラー");
+  await expect(page.locator(".md-content")).toContainText("本文は表示される");
+  await expect(page.locator(".md-content svg")).toHaveCount(1);
+});
+
+test("サーバー停止中の編集が、再起動後に反映される", async ({ page, md }) => {
+  await page.goto(md.baseURL + "/README.md");
+  await expect(page.locator("h1#readme")).toBeVisible();
+  md.proc.kill();
+  await expect(page.locator(".md-status")).toContainText("サーバーとの接続が切れました");
+  await writeFile(join(md.dir, "README.md"), "# Edited While Down\n");
+  const restarted = await md.restart();
+  try {
+    await expect(page.locator("h1#edited-while-down")).toBeVisible({ timeout: 15_000 });
+    await expect(page.locator(".md-status")).not.toContainText("接続が切れました");
+  } finally {
+    restarted.kill();
+  }
+});

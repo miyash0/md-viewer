@@ -10,8 +10,16 @@ export function toUrl(path: string): string {
   return "/" + path.split("/").filter(Boolean).map(encodeURIComponent).join("/");
 }
 
+function safeDecode(s: string): string {
+  try {
+    return decodeURIComponent(s);
+  } catch {
+    return s; // 不正な % はそのまま扱う
+  }
+}
+
 export function pathFromLocation(pathname: string): string {
-  return decodeURIComponent(pathname).replace(/^\/+|\/+$/g, "");
+  return safeDecode(pathname).replace(/^\/+|\/+$/g, "");
 }
 
 /** 本文中のリンクがルート内の Markdown を指すなら、そのルート相対パスを返す。 */

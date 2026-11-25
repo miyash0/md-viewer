@@ -45,6 +45,7 @@ export function App() {
         if (isMarkdownPath(cur) && !hasFile(t.tree, cur)) setReloadToken((n) => n + 1);
       },
       onStatus: setConn,
+      onReconnect: () => isMarkdownPath(pathRef.current) && setReloadToken((n) => n + 1),
     });
     const onPop = () => setPath(pathFromLocation(location.pathname));
     window.addEventListener("popstate", onPop);
