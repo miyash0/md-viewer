@@ -2,12 +2,18 @@ import MarkdownIt, { type MarkdownIt as MarkdownItInstance, type Token } from "m
 import footnote from "markdown-it-footnote";
 import anchor from "markdown-it-anchor";
 import alerts from "markdown-it-github-alerts";
-import katex from "@vscode/markdown-it-katex";
+import katexModule from "@vscode/markdown-it-katex";
 // @ts-expect-error 型定義なし
-import taskLists from "markdown-it-task-lists";
+import taskListsModule from "markdown-it-task-lists";
 import GithubSlugger from "github-slugger";
 import hljs from "highlight.js/lib/common";
 import type { TocItem } from "../types";
+
+// CJS プラグインはバンドラによって関数そのもの／{ default: 関数 } のどちらでも届くので正規化する
+type Plugin = (md: MarkdownItInstance, ...args: any[]) => void;
+const interop = (m: unknown): Plugin => ((m as { default?: Plugin }).default ?? m) as Plugin;
+const katex = interop(katexModule);
+const taskLists = interop(taskListsModule);
 
 export type RenderResult = { html: string; toc: TocItem[]; hasMermaid: boolean };
 

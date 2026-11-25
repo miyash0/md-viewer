@@ -122,3 +122,12 @@ test("tree イベントでツリーが更新される", async () => {
   );
   await findByText("new.md");
 });
+
+test("表示中のファイルがツリーから消えたら再読込してエラーを出す", async () => {
+  treeResp = tree("README.md");
+  const { container } = render(<App />);
+  await waitFor(() => expect(content(container).querySelector("h1#readme")).not.toBeNull());
+  const calls = fetchRaw.mock.calls.length;
+  act(() => handlers.onTree({ ...tree(null), tree: tree(null).tree.filter((n) => n.path !== "README.md") }));
+  await waitFor(() => expect(fetchRaw.mock.calls.length).toBe(calls + 1));
+});

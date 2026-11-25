@@ -1,11 +1,15 @@
 import { useCallback, useEffect, useRef, useState } from "preact/hooks";
 import { fetchTree, subscribeEvents, type ConnectionStatus } from "../api";
 import { findDir, isMarkdownPath, pathFromLocation, resolveMarkdownLink, toUrl } from "../nav";
-import type { TocItem, TreeResponse, ViewState } from "../types";
+import type { TocItem, TreeNode, TreeResponse, ViewState } from "../types";
 import { Content } from "./Content";
 import { DirectoryListing } from "./DirectoryListing";
 import { Sidebar } from "./Sidebar";
 import { StatusIndicator } from "./StatusIndicator";
+
+function hasFile(nodes: TreeNode[], path: string): boolean {
+  return nodes.some((n) => (n.type === "file" ? n.path === path : hasFile(n.children, path)));
+}
 
 const IDLE: ViewState = { phase: "ready", error: null, updatedAt: null };
 
@@ -34,7 +38,12 @@ export function App() {
     );
     const stop = subscribeEvents({
       onChange: (p) => p === pathRef.current && setReloadToken((n) => n + 1),
-      onTree: (t) => setTree((prev) => ({ ...t, initial: prev?.initial ?? t.initial })),
+      onTree: (t) => {
+        setTree((prev) => ({ ...t, initial: prev?.initial ?? t.initial }));
+        // 表示中のファイルが消えたら読み直して「見つかりません」を出す
+        const cur = pathRef.current;
+        if (isMarkdownPath(cur) && !hasFile(t.tree, cur)) setReloadToken((n) => n + 1);
+      },
       onStatus: setConn,
     });
     const onPop = () => setPath(pathFromLocation(location.pathname));
