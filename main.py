@@ -28,11 +28,26 @@ APP_PREFIX = "_md"
 DIST_DIR = Path(__file__).resolve().parent / "frontend" / "dist"
 
 
+EXAMPLES = """\
+examples:
+  md               open the current directory
+  md FILE.md       open FILE.md (root: its parent directory)
+  md DIR/          open DIR/README.md or DIR/index.md, or a listing
+  md -p 9000 DIR/  use port 9000 (fails if it is in use)
+"""
+
+
 def parse_args(argv):
-    p = argparse.ArgumentParser(prog="md", description="Markdown をブラウザでプレビューする")
-    p.add_argument("path", nargs="?", help="Markdown ファイルまたはディレクトリ（省略時はカレントディレクトリ）")
-    p.add_argument("-p", "--port", type=int, help=f"ポート（省略時は {DEFAULT_PORT} から空きを探す）")
-    p.add_argument("--no-open", action="store_true", help="ブラウザを開かない")
+    p = argparse.ArgumentParser(
+        prog="md",
+        description="Preview Markdown in your browser. Updates automatically when you save.",
+        epilog=EXAMPLES,
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+    )
+    p.add_argument("path", nargs="?", help="Markdown file or directory (default: current directory)")
+    p.add_argument("-p", "--port", type=int,
+                   help=f"port to listen on (default: first free port from {DEFAULT_PORT})")
+    p.add_argument("--no-open", action="store_true", help="don't open the browser")
     return p.parse_args(argv)
 
 
@@ -40,7 +55,7 @@ def resolve_target(path, cwd):
     """(root, initial) を返す。initial はルート相対の '/' 区切りパスか None。"""
     target = (Path(cwd) / path) if path else Path(cwd)
     if not target.exists():
-        print(f"見つかりません: {path}", file=sys.stderr)
+        print(f"md: not found: {path}", file=sys.stderr)
         raise SystemExit(2)
     target = target.resolve()
     if target.is_file():
@@ -122,14 +137,14 @@ def bind_server(port, handler):
         try:
             return Server((HOST, port), handler)
         except OSError:
-            print(f"ポート {port} は使用中です", file=sys.stderr)
+            print(f"md: port {port} is already in use", file=sys.stderr)
             raise SystemExit(1)
     for p in range(DEFAULT_PORT, DEFAULT_PORT + PORT_SEARCH):
         try:
             return Server((HOST, p), handler)
         except OSError:
             continue
-    print(f"空きポートが見つかりません（{DEFAULT_PORT}〜{DEFAULT_PORT + PORT_SEARCH - 1}）", file=sys.stderr)
+    print(f"md: no free port in {DEFAULT_PORT}-{DEFAULT_PORT + PORT_SEARCH - 1}", file=sys.stderr)
     raise SystemExit(1)
 
 
@@ -323,7 +338,7 @@ def make_handler(root, initial, watcher, dist):
 
 def root_warnings(root):
     if (root / APP_PREFIX).is_dir():
-        return [f"注意: {root / APP_PREFIX} はアプリの URL (/_md/) と重なるため表示できません"]
+        return [f"md: warning: {root / APP_PREFIX} is hidden because it overlaps the app URL /_md/"]
     return []
 
 
@@ -334,7 +349,7 @@ def start_url(port, initial):
 def main(argv=None):
     args = parse_args(sys.argv[1:] if argv is None else argv)
     if not (DIST_DIR / "index.html").is_file():
-        print(f"フロントエンドが未ビルドです。cd {DIST_DIR.parent} && npm install && npm run build を実行してください",
+        print(f"md: frontend is not built. Run: cd {DIST_DIR.parent} && npm install && npm run build",
               file=sys.stderr)
         raise SystemExit(1)
     root, initial = resolve_target(args.path, Path.cwd())
