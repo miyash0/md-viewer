@@ -1,5 +1,6 @@
 # md
 
+[![CI](https://github.com/miyash0/md-viewer/actions/workflows/ci.yml/badge.svg)](https://github.com/miyash0/md-viewer/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/github/license/miyash0/md-viewer)](LICENSE)
 [![Python 3](https://img.shields.io/badge/python-3-3776AB?logo=python&logoColor=white)](main.py)
 [![Last commit](https://img.shields.io/github/last-commit/miyash0/md-viewer)](https://github.com/miyash0/md-viewer/commits/main)
