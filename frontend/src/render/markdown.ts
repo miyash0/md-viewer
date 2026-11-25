@@ -6,7 +6,7 @@ import katex from "@vscode/markdown-it-katex";
 // @ts-expect-error 型定義なし
 import taskLists from "markdown-it-task-lists";
 import GithubSlugger from "github-slugger";
-import hljs from "highlight.js";
+import hljs from "highlight.js/lib/common";
 import type { TocItem } from "../types";
 
 export type RenderResult = { html: string; toc: TocItem[]; hasMermaid: boolean };
